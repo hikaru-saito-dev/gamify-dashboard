@@ -87,7 +87,12 @@ export class QuestConfigService {
   async getAllQuests(): Promise<IQuest[]> {
     try {
       await connectDB();
-      return await Quest.find({ companyId: this.companyId }).sort({ questType: 1, questId: 1 });
+      const quests = await Quest.find({ companyId: this.companyId }).sort({ questType: 1, questId: 1 });
+      // Normalize objectives ordering for consumers
+      return quests.map((q: IQuest) => ({
+        ...q.toObject(),
+        objectives: [...q.objectives].sort((a, b) => a.order - b.order),
+      })) as unknown as IQuest[];
     } catch (error) {
       console.error('Error getting all quests:', error);
       return [];
@@ -114,9 +119,35 @@ export class QuestConfigService {
   }>): Promise<boolean> {
     try {
       await connectDB();
+      // Sanitize objectives if provided
+      const sanitized: Partial<IQuest> & { objectives?: IQuestObjective[] } = { ...updates } as Partial<IQuest> & { objectives?: IQuestObjective[] };
+      if (updates.objectives) {
+        const normalizedObjectives: IQuestObjective[] = updates.objectives
+          .map((obj, idx) => {
+            const msg = Math.max(0, obj.messageCount || 0);
+            const suc = Math.max(0, obj.successMessageCount || 0);
+            // allow only one type; if both > 0, prefer the greater and zero the other
+            let messageCount = msg;
+            let successMessageCount = suc;
+            if (msg > 0 && suc > 0) {
+              if (msg >= suc) successMessageCount = 0; else messageCount = 0;
+            }
+            return {
+              id: obj.id || `objective_${Date.now()}_${idx}`,
+              messageCount,
+              successMessageCount,
+              xpReward: Math.max(0, obj.xpReward || 0),
+              order: obj.order && obj.order > 0 ? obj.order : idx + 1,
+            } as IQuestObjective;
+          })
+          .sort((a, b) => a.order - b.order)
+          .map((obj, i) => ({ ...obj, order: i + 1 }));
+        sanitized.objectives = normalizedObjectives;
+      }
+
       const result = await Quest.findOneAndUpdate(
         { companyId: this.companyId, questId },
-        { $set: updates },
+        { $set: sanitized },
         { new: true }
       );
       return !!result;
@@ -130,11 +161,16 @@ export class QuestConfigService {
   async getQuestsByType(questType: 'daily' | 'weekly'): Promise<IQuest[]> {
     try {
       await connectDB();
-      return await Quest.find({ 
+      const quests = await Quest.find({ 
         companyId: this.companyId, 
         questType,
         isActive: true 
       }).sort({ questId: 1 });
+      // Ensure objectives sorted by order consistently
+      return quests.map((q: IQuest) => ({
+        ...q.toObject(),
+        objectives: [...q.objectives].sort((a, b) => a.order - b.order),
+      })) as unknown as IQuest[];
     } catch (error) {
       console.error('Error getting quests by type:', error);
       return [];
