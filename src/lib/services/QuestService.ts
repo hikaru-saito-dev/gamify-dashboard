@@ -549,22 +549,49 @@ export class QuestService {
     return nyDate.toISOString().split('T')[0];
   }
 
-  // Get week key (YYYY-WW) in New York timezone
+  // Get week key (YYYY-WW) in New York timezone using ISO 8601
   private getWeekKey(date: Date): string {
-    // Convert to New York timezone for consistent quest dates
-    const nyDate = new Date(date.toLocaleString("en-US", {timeZone: "America/New_York"}));
-    const year = nyDate.getFullYear();
-    const week = this.getWeekNumber(nyDate);
-    return `${year}-W${week.toString().padStart(2, '0')}`;
-  }
-
-  // Get week number of year
-  private getWeekNumber(date: Date): number {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dayNum = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    // Get NY timezone date string and parse components
+    const nyDateStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(date);
+    
+    const parts = nyDateStr.split('-');
+    if (parts.length !== 3) {
+      throw new Error(`Invalid date format: ${nyDateStr}`);
+    }
+    const year = parseInt(parts[0]!, 10);
+    const month = parseInt(parts[1]!, 10);
+    const day = parseInt(parts[2]!, 10);
+    
+    // Create date object for calculations
+    const d = new Date(year, month - 1, day);
+    
+    // ISO 8601: Week starts on Monday, week 1 contains Jan 4
+    // Find the Thursday of the current week (ISO weeks are defined by their Thursday)
+    const dayOfWeek = d.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const thursdayOffset = (4 - dayOfWeek + 7) % 7; // Days to add to get to Thursday
+    const thursday = new Date(d);
+    thursday.setDate(d.getDate() + thursdayOffset);
+    
+    // Find January 4th of the year containing the Thursday
+    const jan4 = new Date(thursday.getFullYear(), 0, 4);
+    const jan4DayOfWeek = jan4.getDay();
+    const jan4ThursdayOffset = (4 - jan4DayOfWeek + 7) % 7;
+    const firstThursday = new Date(jan4);
+    firstThursday.setDate(jan4.getDate() + jan4ThursdayOffset);
+    
+    // Calculate week number
+    const daysDiff = Math.floor((thursday.getTime() - firstThursday.getTime()) / (24 * 60 * 60 * 1000));
+    const weekNumber = Math.floor(daysDiff / 7) + 1;
+    
+    // Year might be different if week spans year boundary
+    const weekYear = thursday.getFullYear();
+    
+    return `${weekYear}-W${weekNumber.toString().padStart(2, '0')}`;
   }
 
   // Migrate quest progress when new objectives are added
